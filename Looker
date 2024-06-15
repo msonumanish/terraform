@@ -1,0 +1,58 @@
+
+import requests
+
+base_url = 'https://<your-looker-instance>.looker.com:19999/api/3.1'
+client_id = '<your-client-id>'
+client_secret = '<your-client-secret>'
+access_token = None
+
+# Get access token
+def get_access_token():
+    global access_token
+    auth_data = {
+        'client_id': client_id,
+        'client_secret': client_secret
+    }
+    response = requests.post(f'{base_url}/login', json=auth_data)
+    response_data = response.json()
+    access_token = response_data.get('access_token')
+
+# Get all groups
+def get_all_groups():
+    headers = {
+        'Authorization': f'Bearer {access_token}'
+    }
+    response = requests.get(f'{base_url}/groups', headers=headers)
+    groups = response.json()
+    return groups
+
+# Check if user is a member of a group
+def is_user_in_group(group_id, user_id):
+    headers = {
+        'Authorization': f'Bearer {access_token}'
+    }
+    response = requests.get(f'{base_url}/groups/{group_id}/users/{user_id}', headers=headers)
+    return response.status_code == 200
+
+# Delete user from a group
+def delete_user_from_group(group_id, user_id):
+    headers = {
+        'Authorization': f'Bearer {access_token}'
+    }
+    response = requests.delete(f'{base_url}/groups/{group_id}/users/{user_id}', headers=headers)
+    if response.status_code == 204:
+        print(f'User with ID {user_id} deleted from group with ID {group_id}')
+    else:
+        print(f'Failed to delete user with ID {user_id} from group with ID {group_id}')
+
+# Main function
+if __name__ == '__main__':
+    get_access_token()
+    groups = get_all_groups()
+    
+    user_id_to_delete = '123'  # User ID to delete
+    
+    for group in groups:
+        group_id = group.get('id')
+        if is_user_in_group(group_id, user_id_to_delete):
+            delete_user_from_group(group_id, user_id_to_delete)
