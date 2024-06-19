@@ -1,0 +1,99 @@
+import looker_sdk
+from looker_sdk import models, error
+import logging
+import csv
+from datetime import datetime
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+# Generate a timestamp to make filenames unique for each run
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# Configure logging
+log_filename = f"remove_user_from_groups_{timestamp}.log"
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler(log_filename),
+                        logging.StreamHandler()
+                    ])
+logger = logging.getLogger()
+
+# Initialize the Looker SDK
+sdk = looker_sdk.init31()  # Use init40() if you're using Looker API 4.0
+
+def send_email(subject, body):
+    # SMTP server configuration
+    smtp_server = 'smtp.example.com'  # Replace with your SMTP server
+    smtp_port = 587  # Replace with your SMTP server port
+    smtp_username = 'your_email@example.com'  # Replace with your email
+    smtp_password = 'your_password'  # Replace with your email password
+    from_email = 'your_email@example.com'  # Replace with your email
+    to_email = 'recipient@example.com'  # Replace with recipient's email
+
+    # Create a multipart message
+    msg = MIMEMultipart()
+    msg['From'] = from_email
+    msg['To'] = to_email
+    msg['Subject'] = subject
+
+    # Add body to email
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        # Connect to the server and send email
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.send_message(msg)
+        server.quit()
+        logger.info(f"Email sent successfully to {to_email}")
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")
+
+def remove_users_from_groups(user_ids: list):
+    try:
+        logger.info(f"Starting to remove users {user_ids} from all groups")
+
+        # Prepare CSV file for writing
+        csv_filename = f"updated_groups_members_{timestamp}.csv"
+        with open(csv_filename, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['Group ID', 'Group Name', 'User ID', 'User Name'])
+
+            # Fetch all groups and process each one
+            groups = sdk.all_groups()
+            for group in groups:
+                # Fetch all members of the current group
+                members = sdk.all_group_users(group_id=group.id)
+                
+                # Remove each user in the user_ids list if present in the group
+                user_removed = False
+                for user_id in user_ids:
+                    if any(member.id == user_id for member in members):
+                        sdk.delete_group_user(group_id=group.id, user_id=user_id)
+                        logger.info(f"Removed user {user_id} from group {group.id}")
+                        user_removed = True
+
+                # Fetch all members again after potential removals
+                if user_removed:
+                    updated_members = sdk.all_group_users(group_id=group.id)
+                else:
+                    updated_members = members  # No change if no user was removed
+                
+                for updated_member in updated_members:
+                    writer.writerow([group.id, group.name, updated_member.id, updated_member.display_name])
+                    logger.info(f"Group ID: {group.id}, Group Name: {group.name}, User ID: {updated_member.id}, User Name: {updated_member.display_name}")
+
+        # Send success email
+        send_email("User Removal Successful", f"The users {user_ids} were successfully removed from the groups. The updated members are saved in {csv_filename}.")
+
+    except error.SDKError as e:
+        logger.error(f"An error occurred: {e}")
+        # Send failure email
+        send_email("User Removal Failed", f"An error occurred while removing the users {user_ids}. Error: {e}")
+
+# Example usage
+user_ids_to_remove = [123, 456, 789]  # Replace with the actual user IDs
+remove_users_from_groups(user_ids_to_remove)
